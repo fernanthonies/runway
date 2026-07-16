@@ -1,0 +1,13 @@
+services:
+  budget:
+    build: .
+    ports:
+      # host:container — 8000 on this machine is taken by backlog-board
+      - "8100:8000"
+    volumes:
+      - ./data:/data
+    environment:
+      # Set to your local timezone so weekly (Sunday) and monthly (1st)
+      # resets happen at your midnight, not UTC's.
+      - TZ=America/New_York
+    restart: unless-stopped

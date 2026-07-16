@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Runway</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◆</text></svg>">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@200;300;400;500&family=Spline+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <div class="grain" aria-hidden="true"></div>
+
+  <header class="topbar">
+    <span class="wordmark">◆ RUNWAY</span>
+    <button id="settingsBtn" class="gear" title="Settings" aria-label="Settings">
+      <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
+        <circle cx="12" cy="12" r="3"/>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+      </svg>
+    </button>
+    <div id="settingsPanel" class="settings-panel" hidden>
+      <label class="label" for="budgetInput">MONTHLY BUDGET</label>
+      <div class="settings-row">
+        <div class="field money-field">
+          <span class="prefix">$</span>
+          <input id="budgetInput" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off">
+        </div>
+        <button id="budgetSave" class="btn btn-small">Save</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="stage">
+    <section class="hero reveal">
+      <div class="label" id="monthLabel">REMAINING</div>
+      <div class="amount hero-amount" id="monthlyAmount">$0.00</div>
+      <div class="meter"><div class="meter-fill" id="monthlyMeter"></div></div>
+    </section>
+
+    <section class="sub reveal">
+      <div class="label" id="weekLabel">THIS WEEK · RESETS SUNDAY</div>
+      <div class="amount sub-amount" id="weeklyAmount">$0.00</div>
+      <div class="meter meter-narrow"><div class="meter-fill" id="weeklyMeter"></div></div>
+    </section>
+
+    <p class="hint" id="firstRunHint" hidden>Set your monthly budget to get started&nbsp;→&nbsp;⚙</p>
+
+    <form id="txnForm" class="entry reveal" autocomplete="off">
+      <div class="entry-grid">
+        <div class="field money-field">
+          <span class="prefix">$</span>
+          <input id="amountInput" type="text" inputmode="decimal" placeholder="0.00" aria-label="Amount">
+        </div>
+        <div class="field ac-field">
+          <input id="merchantInput" type="text" placeholder="Merchant" aria-label="Merchant">
+        </div>
+        <div class="field ac-field">
+          <input id="categoryInput" type="text" placeholder="Category" aria-label="Category">
+        </div>
+      </div>
+      <div class="entry-actions">
+        <div class="field date-field">
+          <input id="dateInput" type="date" aria-label="Date">
+        </div>
+        <button type="submit" class="btn btn-submit">Log transaction</button>
+      </div>
+      <p class="form-error" id="formError" hidden></p>
+    </form>
+
+    <section class="recent reveal">
+      <div class="label recent-label">RECENT</div>
+      <ul id="recentList" class="recent-list"></ul>
+      <p class="empty" id="recentEmpty" hidden>Nothing logged yet.</p>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>
