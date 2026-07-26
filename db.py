@@ -115,18 +115,68 @@ def get_transaction(txn_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def recent_transactions(limit: int) -> list[dict]:
+def list_transactions(
+    start: str | None = None,
+    end: str | None = None,
+    merchant: str | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Filtered page of transactions plus the total matching count.
+
+    start/end are ISO dates forming a half-open window [start, end).
+    Merchant/category match exactly, case-insensitively.
+    """
+    where = []
+    params: list = []
+    if start:
+        where.append("t.txn_date >= ?")
+        params.append(start)
+    if end:
+        where.append("t.txn_date < ?")
+        params.append(end)
+    if merchant:
+        where.append("m.name = ? COLLATE NOCASE")
+        params.append(merchant)
+    if category:
+        where.append("c.name = ? COLLATE NOCASE")
+        params.append(category)
+
+    base = (
+        "FROM transactions t "
+        "JOIN merchants m ON m.id = t.merchant_id "
+        "JOIN categories c ON c.id = t.category_id "
+    )
+    if where:
+        base += "WHERE " + " AND ".join(where) + " "
+
     with connect() as conn:
+        total = conn.execute(f"SELECT COUNT(*) AS n {base}", params).fetchone()["n"]
         rows = conn.execute(
             "SELECT t.id, t.amount_cents, t.txn_date, t.created_at, "
             "m.name AS merchant, c.name AS category "
-            "FROM transactions t "
-            "JOIN merchants m ON m.id = t.merchant_id "
-            "JOIN categories c ON c.id = t.category_id "
-            "ORDER BY t.txn_date DESC, t.id DESC LIMIT ?",
-            (limit,),
+            f"{base}ORDER BY t.txn_date DESC, t.id DESC LIMIT ? OFFSET ?",
+            (*params, limit, offset),
         ).fetchall()
-    return [dict(r) for r in rows]
+    return [dict(r) for r in rows], total
+
+
+def update_transaction(
+    txn_id: int, amount_cents: int, merchant: str, category: str, txn_date: str
+) -> dict | None:
+    with connect() as conn:
+        # Check existence first so a 404 doesn't leave upserted names behind.
+        if not conn.execute("SELECT 1 FROM transactions WHERE id = ?", (txn_id,)).fetchone():
+            return None
+        merchant_id = _upsert_name(conn, "merchants", merchant)
+        category_id = _upsert_name(conn, "categories", category)
+        conn.execute(
+            "UPDATE transactions SET amount_cents = ?, merchant_id = ?, "
+            "category_id = ?, txn_date = ? WHERE id = ?",
+            (amount_cents, merchant_id, category_id, txn_date, txn_id),
+        )
+    return get_transaction(txn_id)
 
 
 def delete_transaction(txn_id: int) -> bool:

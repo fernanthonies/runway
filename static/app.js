@@ -22,6 +22,20 @@ const els = {
   settingsPanel: $("#settingsPanel"),
   budgetInput: $("#budgetInput"),
   budgetSave: $("#budgetSave"),
+  dashboardView: $("#dashboardView"),
+  historyView: $("#historyView"),
+  navDashboard: $("#navDashboard"),
+  navHistory: $("#navHistory"),
+  filterStart: $("#filterStart"),
+  filterEnd: $("#filterEnd"),
+  filterMerchant: $("#filterMerchant"),
+  filterCategory: $("#filterCategory"),
+  filterClear: $("#filterClear"),
+  historyMeta: $("#historyMeta"),
+  historyList: $("#historyList"),
+  historyEmpty: $("#historyEmpty"),
+  historyError: $("#historyError"),
+  loadMore: $("#loadMore"),
 };
 
 const state = {
@@ -30,7 +44,10 @@ const state = {
   categories: [],
   shown: { monthly: 0, weekly: 0 }, // currently displayed values, for tick animation
   firstRunNudged: false,
+  history: { items: [], total: 0, loaded: false },
 };
+
+const HISTORY_PAGE = 50;
 
 /* ── helpers ─────────────────────────────────────────────────────── */
 
@@ -169,6 +186,9 @@ async function refreshAll(animate = true) {
   state.categories = categories.categories;
   renderSummary(summary, animate);
   renderRecent(recent.transactions);
+  fillSelect(els.filterMerchant, state.merchants, "All merchants");
+  fillSelect(els.filterCategory, state.categories, "All categories");
+  if (state.history.loaded) await loadHistory(true);
 }
 
 function showError(msg) {
@@ -222,12 +242,12 @@ async function submitTransaction(e) {
   await refreshAll();
 }
 
-async function deleteTransaction(id) {
+async function deleteTransaction(id, reportError = showError) {
   try {
     await api(`/transactions/${id}`, { method: "DELETE" });
     await refreshAll();
   } catch (err) {
-    showError(err.message);
+    reportError(err.message);
   }
 }
 
@@ -274,6 +294,235 @@ els.budgetInput.addEventListener("keydown", (e) => {
     saveBudget();
   }
 });
+
+/* ── history view ────────────────────────────────────────────────── */
+
+function showHistoryError(msg) {
+  els.historyError.textContent = msg;
+  els.historyError.hidden = false;
+}
+
+function clearHistoryError() {
+  els.historyError.hidden = true;
+}
+
+function fillSelect(select, names, placeholder) {
+  const current = select.value;
+  select.innerHTML = "";
+  select.append(new Option(placeholder, ""));
+  for (const name of names) select.append(new Option(name, name));
+  select.value = names.includes(current) ? current : "";
+}
+
+function historyQuery(offset) {
+  const params = new URLSearchParams({ limit: HISTORY_PAGE, offset });
+  if (els.filterStart.value) params.set("start", els.filterStart.value);
+  if (els.filterEnd.value) params.set("end", els.filterEnd.value);
+  if (els.filterMerchant.value) params.set("merchant", els.filterMerchant.value);
+  if (els.filterCategory.value) params.set("category", els.filterCategory.value);
+  return `/transactions?${params}`;
+}
+
+async function loadHistory(reset = false) {
+  clearHistoryError();
+  if (reset) state.history.items = [];
+  try {
+    const data = await api(historyQuery(state.history.items.length));
+    state.history.items.push(...data.transactions);
+    state.history.total = data.total;
+    state.history.loaded = true;
+    renderHistory();
+  } catch (err) {
+    showHistoryError(err.message);
+  }
+}
+
+function renderHistory() {
+  const { items, total } = state.history;
+  els.historyMeta.textContent =
+    total === 0 ? "HISTORY" : `HISTORY · ${items.length < total ? `${items.length} OF ` : ""}${total}`;
+  els.historyEmpty.hidden = total > 0;
+  els.loadMore.hidden = items.length >= total;
+  els.historyList.innerHTML = "";
+  for (const t of items) els.historyList.appendChild(historyRow(t));
+}
+
+function historyRow(t) {
+  const li = document.createElement("li");
+
+  const date = document.createElement("span");
+  date.className = "txn-date";
+  date.textContent = `${t.date.slice(5, 7)}/${t.date.slice(8, 10)}`;
+  date.title = t.date;
+
+  const merchant = document.createElement("span");
+  merchant.className = "txn-merchant";
+  merchant.textContent = t.merchant;
+
+  const category = document.createElement("span");
+  category.className = "txn-category";
+  category.textContent = t.category;
+
+  const amount = document.createElement("span");
+  amount.className = "txn-amount";
+  amount.textContent = formatMoney(t.amount);
+
+  const edit = document.createElement("button");
+  edit.className = "txn-edit";
+  edit.title = "Edit transaction";
+  edit.textContent = "✎";
+  edit.addEventListener("click", () => editRow(li, t));
+
+  const del = document.createElement("button");
+  del.className = "txn-delete";
+  del.title = "Delete transaction";
+  del.textContent = "×";
+  del.addEventListener("click", () => deleteTransaction(t.id, showHistoryError));
+
+  li.append(date, merchant, category, amount, edit, del);
+  return li;
+}
+
+function editRow(li, t) {
+  li.classList.add("editing");
+  li.innerHTML = "";
+
+  const makeField = (className, input) => {
+    const field = document.createElement("div");
+    field.className = `field ${className}`;
+    field.appendChild(input);
+    return field;
+  };
+
+  const amountInput = Object.assign(document.createElement("input"), {
+    type: "text", inputMode: "decimal", value: t.amount.toFixed(2),
+  });
+  amountInput.setAttribute("aria-label", "Amount");
+  const amountField = makeField("money-field", amountInput);
+  const prefix = Object.assign(document.createElement("span"), { className: "prefix", textContent: "$" });
+  amountField.prepend(prefix);
+
+  const merchantInput = Object.assign(document.createElement("input"), {
+    type: "text", value: t.merchant, autocomplete: "off",
+  });
+  merchantInput.setAttribute("aria-label", "Merchant");
+  const merchantField = makeField("ac-field", merchantInput);
+
+  const categoryInput = Object.assign(document.createElement("input"), {
+    type: "text", value: t.category, autocomplete: "off",
+  });
+  categoryInput.setAttribute("aria-label", "Category");
+  const categoryField = makeField("ac-field", categoryInput);
+
+  const dateInput = Object.assign(document.createElement("input"), { type: "date", value: t.date });
+  dateInput.setAttribute("aria-label", "Date");
+  const dateField = makeField("date-field", dateInput);
+
+  const grid = document.createElement("div");
+  grid.className = "edit-grid";
+  grid.append(amountField, merchantField, categoryField);
+
+  const save = Object.assign(document.createElement("button"), {
+    type: "button", className: "btn btn-small", textContent: "Save",
+  });
+  const cancel = Object.assign(document.createElement("button"), {
+    type: "button", className: "btn-ghost btn-small", textContent: "Cancel",
+  });
+
+  const actions = document.createElement("div");
+  actions.className = "edit-actions";
+  actions.append(dateField, save, cancel);
+
+  const error = document.createElement("p");
+  error.className = "form-error";
+  error.hidden = true;
+
+  li.append(grid, actions, error);
+
+  attachAutocomplete(merchantInput, () => state.merchants);
+  attachAutocomplete(categoryInput, () => state.categories);
+
+  const showEditError = (msg) => {
+    error.textContent = msg;
+    error.hidden = false;
+  };
+
+  async function saveEdit() {
+    error.hidden = true;
+    const amount = parseFloat(amountInput.value);
+    if (!Number.isFinite(amount) || amount <= 0) {
+      showEditError("Enter an amount greater than zero.");
+      amountInput.focus();
+      return;
+    }
+    if (!merchantInput.value.trim()) {
+      showEditError("Merchant is required.");
+      merchantInput.focus();
+      return;
+    }
+    if (!categoryInput.value.trim()) {
+      showEditError("Category is required.");
+      categoryInput.focus();
+      return;
+    }
+    try {
+      await api(`/transactions/${t.id}`, {
+        method: "PUT",
+        body: JSON.stringify({
+          amount,
+          merchant: merchantInput.value,
+          category: categoryInput.value,
+          date: dateInput.value || null,
+        }),
+      });
+    } catch (err) {
+      showEditError(err.message);
+      return;
+    }
+    await refreshAll(false); // reloads history (and dashboard) with the edit applied
+  }
+
+  save.addEventListener("click", saveEdit);
+  cancel.addEventListener("click", () => renderHistory());
+  // Capture phase: runs before the autocomplete's own handlers close the list,
+  // so an Enter/Escape meant for the dropdown never saves/cancels the row.
+  li.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !li.querySelector(".ac-list:not([hidden]) .active")) {
+      e.preventDefault();
+      saveEdit();
+    } else if (e.key === "Escape" && !li.querySelector(".ac-list:not([hidden])")) {
+      renderHistory();
+    }
+  }, true);
+
+  amountInput.focus();
+  amountInput.select();
+}
+
+/* ── view switching ──────────────────────────────────────────────── */
+
+function showView() {
+  const history = location.hash === "#history";
+  els.dashboardView.hidden = history;
+  els.historyView.hidden = !history;
+  els.navDashboard.classList.toggle("active", !history);
+  els.navHistory.classList.toggle("active", history);
+  if (history && !state.history.loaded) loadHistory(true);
+}
+
+window.addEventListener("hashchange", showView);
+
+for (const el of [els.filterStart, els.filterEnd, els.filterMerchant, els.filterCategory]) {
+  el.addEventListener("change", () => loadHistory(true));
+}
+els.filterClear.addEventListener("click", () => {
+  els.filterStart.value = "";
+  els.filterEnd.value = "";
+  els.filterMerchant.value = "";
+  els.filterCategory.value = "";
+  loadHistory(true);
+});
+els.loadMore.addEventListener("click", () => loadHistory());
 
 /* ── autocomplete ────────────────────────────────────────────────── */
 
@@ -364,4 +613,5 @@ attachAutocomplete(els.category, () => state.categories);
 els.form.addEventListener("submit", submitTransaction);
 els.date.value = todayISO();
 
+showView();
 refreshAll().catch((err) => showError(err.message));

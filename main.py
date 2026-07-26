@@ -86,6 +86,23 @@ def _clean_name(value: str, field: str) -> str:
     return name
 
 
+def _parse_date(value: str, label: str = "Date") -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        raise HTTPException(400, f"{label} must be YYYY-MM-DD")
+
+
+def _validate_txn(body: "TransactionIn") -> tuple[int, str, str, str]:
+    """Validate a transaction payload; returns (amount_cents, merchant, category, txn_date_iso)."""
+    if not (0 < body.amount < MAX_AMOUNT):
+        raise HTTPException(400, "Amount must be greater than 0")
+    merchant = _clean_name(body.merchant, "Merchant")
+    category = _clean_name(body.category, "Category")
+    txn_date = _parse_date(body.date) if body.date else date.today()
+    return dollars_to_cents(body.amount), merchant, category, txn_date.isoformat()
+
+
 def txn_to_json(txn: dict) -> dict:
     return {
         "id": txn["id"],
@@ -104,33 +121,42 @@ def get_summary():
 
 @app.post("/api/transactions", status_code=201)
 def create_transaction(body: TransactionIn):
-    if not (0 < body.amount < MAX_AMOUNT):
-        raise HTTPException(400, "Amount must be greater than 0")
-    merchant = _clean_name(body.merchant, "Merchant")
-    category = _clean_name(body.category, "Category")
-
-    if body.date:
-        try:
-            txn_date = date.fromisoformat(body.date)
-        except ValueError:
-            raise HTTPException(400, "Date must be YYYY-MM-DD")
-    else:
-        txn_date = date.today()
-
+    amount_cents, merchant, category, txn_date = _validate_txn(body)
     txn = db.add_transaction(
-        dollars_to_cents(body.amount),
+        amount_cents,
         merchant,
         category,
-        txn_date.isoformat(),
+        txn_date,
         datetime.now().isoformat(timespec="seconds"),
     )
     return {"transaction": txn_to_json(txn), "summary": build_summary()}
 
 
 @app.get("/api/transactions")
-def list_transactions(limit: int = 5):
+def list_transactions(
+    limit: int = 5,
+    offset: int = 0,
+    start: str | None = None,
+    end: str | None = None,
+    merchant: str | None = None,
+    category: str | None = None,
+):
     limit = max(1, min(limit, 100))
-    return {"transactions": [txn_to_json(t) for t in db.recent_transactions(limit)]}
+    offset = max(0, offset)
+    start_iso = _parse_date(start, "Start date").isoformat() if start else None
+    # `end` is inclusive from the client's perspective; the DB window is half-open.
+    end_iso = (_parse_date(end, "End date") + timedelta(days=1)).isoformat() if end else None
+    txns, total = db.list_transactions(start_iso, end_iso, merchant, category, limit, offset)
+    return {"transactions": [txn_to_json(t) for t in txns], "total": total}
+
+
+@app.put("/api/transactions/{txn_id}")
+def edit_transaction(txn_id: int, body: TransactionIn):
+    amount_cents, merchant, category, txn_date = _validate_txn(body)
+    txn = db.update_transaction(txn_id, amount_cents, merchant, category, txn_date)
+    if txn is None:
+        raise HTTPException(404, "Transaction not found")
+    return {"transaction": txn_to_json(txn), "summary": build_summary()}
 
 
 @app.delete("/api/transactions/{txn_id}")
