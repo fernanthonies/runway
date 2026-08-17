@@ -8,7 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@200;300;400;500&family=Spline+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="/static/style.css">
+  <!-- ?v= busts copies cached before the no-cache headers existed; bump if a
+       stale asset ever survives a rebuild again. -->
+  <link rel="stylesheet" href="/static/style.css?v=2">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -18,6 +20,7 @@
     <nav class="nav">
       <a href="#" class="nav-link" id="navDashboard">DASHBOARD</a>
       <a href="#history" class="nav-link" id="navHistory">HISTORY</a>
+      <a href="#stats" class="nav-link" id="navStats">STATS</a>
     </nav>
     <button id="settingsBtn" class="gear" title="Settings" aria-label="Settings">
       <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -33,6 +36,24 @@
           <input id="budgetInput" type="text" inputmode="decimal" placeholder="0.00" autocomplete="off">
         </div>
         <button id="budgetSave" class="btn btn-small">Save</button>
+      </div>
+
+      <div class="settings-divider"></div>
+      <label class="label">HISTORY</label>
+      <div class="danger-zone">
+        <button id="resetBtn" class="btn-ghost btn-danger btn-block" type="button">Delete all history</button>
+        <div id="resetConfirm" class="reset-confirm" hidden>
+          <p class="reset-warn">
+            Delete every transaction, merchant and category? The database is
+            backed up to <code>data/backups/</code> first, so this can be undone.
+            Your monthly budget is kept.
+          </p>
+          <div class="settings-row">
+            <button id="resetCancel" class="btn-ghost btn-small" type="button">Cancel</button>
+            <button id="resetYes" class="btn btn-small btn-danger-solid" type="button">Yes, delete</button>
+          </div>
+        </div>
+        <p id="resetNote" class="reset-note" hidden></p>
       </div>
     </div>
   </header>
@@ -114,6 +135,86 @@
     </section>
   </main>
 
-  <script src="/static/app.js"></script>
+  <main class="stage stage-wide" id="statsView" hidden>
+    <section class="filters reveal">
+      <div class="label">PERIOD</div>
+      <div class="preset-row" id="presetRow" role="group" aria-label="Time range presets">
+        <button class="preset" data-preset="this-month" type="button">THIS MONTH</button>
+        <button class="preset" data-preset="last-month" type="button">LAST MONTH</button>
+        <button class="preset" data-preset="3m" type="button">3M</button>
+        <button class="preset" data-preset="6m" type="button">6M</button>
+        <button class="preset" data-preset="12m" type="button">12M</button>
+        <button class="preset" data-preset="all" type="button">ALL</button>
+      </div>
+      <div class="filter-grid stats-filter-grid">
+        <div class="filter-item">
+          <label class="filter-label" for="statsStart">FROM</label>
+          <div class="field date-field"><input id="statsStart" type="date"></div>
+        </div>
+        <div class="filter-item">
+          <label class="filter-label" for="statsEnd">TO</label>
+          <div class="field date-field"><input id="statsEnd" type="date"></div>
+        </div>
+        <div class="filter-item">
+          <label class="filter-label" for="statsMerchant">MERCHANT</label>
+          <div class="field select-field"><select id="statsMerchant"></select></div>
+        </div>
+        <div class="filter-item">
+          <label class="filter-label" for="statsCategory">CATEGORY</label>
+          <div class="field select-field"><select id="statsCategory"></select></div>
+        </div>
+        <button id="statsClear" class="btn-ghost btn-small" type="button">Clear</button>
+      </div>
+      <a href="#history" class="history-link" id="statsToHistory">VIEW THESE TRANSACTIONS IN HISTORY →</a>
+    </section>
+
+    <section class="stat-tiles reveal" id="statTiles">
+      <div class="stat-tile">
+        <div class="filter-label">SPENT</div>
+        <div class="stat-value" id="statSpent">$0.00</div>
+      </div>
+      <div class="stat-tile">
+        <div class="filter-label">TRANSACTIONS</div>
+        <div class="stat-value" id="statCount">0</div>
+      </div>
+      <div class="stat-tile">
+        <div class="filter-label">AVG TRANSACTION</div>
+        <div class="stat-value" id="statAverage">$0.00</div>
+      </div>
+      <div class="stat-tile">
+        <div class="filter-label">TOP CATEGORY</div>
+        <div class="stat-value stat-value-text" id="statTopCategory">—</div>
+      </div>
+    </section>
+
+    <p class="empty stats-empty" id="statsEmpty" hidden>No transactions in this period.</p>
+    <p class="form-error" id="statsError" hidden></p>
+
+    <div id="statsCharts">
+      <section class="chart-section reveal">
+        <div class="label chart-title" id="categoryChartTitle">SPENDING BY CATEGORY</div>
+        <p class="chart-hint">Click a slice to drill into that category.</p>
+        <div class="donut-wrap">
+          <div class="chart-box donut-box"><canvas id="categoryChart"></canvas></div>
+          <ul class="chart-legend" id="categoryLegend"></ul>
+        </div>
+      </section>
+
+      <section class="chart-section reveal">
+        <div class="label chart-title" id="merchantChartTitle">TOP MERCHANTS</div>
+        <p class="chart-hint">Click a bar to drill into that merchant.</p>
+        <div class="chart-box" id="merchantBox"><canvas id="merchantChart"></canvas></div>
+      </section>
+
+      <section class="chart-section reveal">
+        <div class="label chart-title" id="monthChartTitle">SPENDING BY MONTH</div>
+        <div class="chart-box month-box"><canvas id="monthChart"></canvas></div>
+        <ul class="chart-legend chart-legend-row" id="monthLegend"></ul>
+      </section>
+    </div>
+  </main>
+
+  <script src="/static/chart.umd.min.js"></script>
+  <script src="/static/app.js?v=2"></script>
 </body>
 </html>

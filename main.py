@@ -77,6 +77,10 @@ class SettingsIn(BaseModel):
     monthly_budget: float
 
 
+class ResetIn(BaseModel):
+    confirm: bool = False
+
+
 def _clean_name(value: str, field: str) -> str:
     name = " ".join(value.split())
     if not name:
@@ -150,6 +154,40 @@ def list_transactions(
     return {"transactions": [txn_to_json(t) for t in txns], "total": total}
 
 
+@app.get("/api/stats")
+def get_stats(
+    start: str | None = None,
+    end: str | None = None,
+    merchant: str | None = None,
+    category: str | None = None,
+):
+    start_iso = _parse_date(start, "Start date").isoformat() if start else None
+    # `end` is inclusive from the client's perspective; the DB window is half-open.
+    end_iso = (_parse_date(end, "End date") + timedelta(days=1)).isoformat() if end else None
+    stats = db.stats_between(start_iso, end_iso, merchant, category)
+
+    totals = stats["totals"]
+    return {
+        "totals": {
+            "spent": cents_to_dollars(totals["cents"]),
+            "count": totals["count"],
+            "average": cents_to_dollars(round(totals["cents"] / totals["count"]) if totals["count"] else 0),
+        },
+        "by_category": [
+            {"name": r["name"], "spent": cents_to_dollars(r["cents"]), "count": r["count"]}
+            for r in stats["by_category"]
+        ],
+        "by_merchant": [
+            {"name": r["name"], "spent": cents_to_dollars(r["cents"]), "count": r["count"]}
+            for r in stats["by_merchant"]
+        ],
+        "by_month": [
+            {"month": r["month"], "category": r["category"], "spent": cents_to_dollars(r["cents"])}
+            for r in stats["by_month"]
+        ],
+    }
+
+
 @app.put("/api/transactions/{txn_id}")
 def edit_transaction(txn_id: int, body: TransactionIn):
     amount_cents, merchant, category, txn_date = _validate_txn(body)
@@ -168,7 +206,10 @@ def remove_transaction(txn_id: int):
 
 @app.get("/api/merchants")
 def get_merchants():
-    return {"merchants": db.list_names("merchants")}
+    return {
+        "merchants": db.list_names("merchants"),
+        "top_categories": db.merchant_top_categories(),
+    }
 
 
 @app.get("/api/categories")
@@ -189,12 +230,42 @@ def update_settings(body: SettingsIn):
     return {"monthly_budget": cents_to_dollars(db.get_monthly_budget_cents()), "summary": build_summary()}
 
 
+@app.post("/api/reset")
+def reset_data(body: ResetIn):
+    """Soft-delete all history: back the database up, then start it empty.
+
+    `confirm` must be true, so a stray POST can't wipe the log; the UI's
+    are-you-sure step is what sets it.
+    """
+    if not body.confirm:
+        raise HTTPException(400, "Deleting history must be confirmed")
+    backup = db.reset_database(datetime.now().strftime("%Y%m%d-%H%M%S"))
+    return {"backup": backup, "summary": build_summary()}
+
+
+class RevalidatingStaticFiles(StaticFiles):
+    """Static assets that must be revalidated on every load.
+
+    There is no build step and so no content hashing: app.js keeps its name
+    across rebuilds. Without an explicit Cache-Control, browsers heuristically
+    cache it and a rebuilt frontend silently doesn't reach the page. `no-cache`
+    still allows a 304 via the ETag, so revalidation stays cheap.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
+
+
 @app.get("/")
 def index():
-    return FileResponse(BASE_DIR / "static" / "index.html")
+    return FileResponse(
+        BASE_DIR / "static" / "index.html", headers={"Cache-Control": "no-cache"}
+    )
 
 
-app.mount("/static", StaticFiles(directory=BASE_DIR / "static"), name="static")
+app.mount("/static", RevalidatingStaticFiles(directory=BASE_DIR / "static"), name="static")
 
 
 if __name__ == "__main__":

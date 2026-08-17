@@ -222,6 +222,16 @@ body {
   box-shadow: 0 12px 24px -18px color-mix(in srgb, var(--mint) 55%, transparent);
 }
 
+/* Brief mint wash when a field is filled in for the user (category from merchant). */
+.field input.autofilled { animation: autofill-flash 0.9s ease-out; }
+@keyframes autofill-flash {
+  from {
+    background: color-mix(in srgb, var(--mint) 16%, transparent);
+    border-color: color-mix(in srgb, var(--mint) 65%, transparent);
+  }
+  to { background: transparent; }
+}
+
 .money-field .prefix {
   font-family: var(--font-mono);
   font-size: 14px;
@@ -426,6 +436,53 @@ body {
 }
 .btn-ghost:hover { color: var(--ink); border-color: var(--dim); }
 
+/* ── settings · danger zone ──────────────────────────────────────── */
+
+.settings-divider {
+  height: 1px;
+  margin: 18px -18px 16px; /* full-bleed across the panel's padding */
+  background: var(--hair);
+}
+
+.btn-block { width: 100%; }
+
+.btn-danger { color: color-mix(in srgb, var(--red) 70%, var(--dim)); }
+.btn-danger:hover {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 55%, transparent);
+}
+
+.btn-danger-solid {
+  color: #240703;
+  background: var(--red);
+  box-shadow: 0 8px 30px -12px color-mix(in srgb, var(--red) 70%, transparent);
+}
+.btn-danger-solid:hover {
+  box-shadow: 0 10px 36px -10px color-mix(in srgb, var(--red) 80%, transparent);
+}
+
+.danger-zone { margin-top: 10px; }
+.reset-warn {
+  margin-top: 12px;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--dim);
+}
+.reset-warn code { font-family: var(--font-mono); font-size: 11px; color: var(--ink); }
+/* Keep both labels on one line in the 260px panel; the danger button takes
+   whatever width Cancel doesn't need. */
+.reset-confirm .settings-row > * { flex: 0 1 auto; white-space: nowrap; padding: 10px 14px; }
+.reset-confirm .btn-danger-solid { flex: 1; }
+.reset-note {
+  margin-top: 12px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+  color: var(--faint);
+  word-break: break-all;
+}
+.reset-note.error { color: var(--red); }
+
 .history { margin-top: 6vh; }
 
 .history-list li { grid-template-columns: 52px 1fr auto auto 26px 26px; }
@@ -469,6 +526,146 @@ body {
 
 .load-more { display: block; margin: 20px auto 0; }
 
+/* ── stats view ──────────────────────────────────────────────────── */
+
+.stage-wide { max-width: 720px; }
+
+.preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.preset {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.18em;
+  color: var(--dim);
+  background: none;
+  border: 1px solid var(--hair);
+  border-radius: 99px;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+.preset:hover { color: var(--ink); border-color: var(--dim); }
+.preset.active {
+  color: var(--ink);
+  border-color: color-mix(in srgb, var(--mint) 65%, transparent);
+  box-shadow: 0 0 18px -8px color-mix(in srgb, var(--mint) 70%, transparent);
+}
+
+.stats-filter-grid { margin-top: 20px; }
+
+.history-link {
+  display: inline-block;
+  margin-top: 18px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 0.22em;
+  color: var(--faint);
+  text-decoration: none;
+  transition: color 0.2s;
+}
+.history-link:hover { color: var(--mint); }
+
+.stat-tiles {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 16px;
+  margin-top: 6vh;
+}
+
+.stat-tile {
+  border-top: 1px solid var(--hair);
+  padding-top: 12px;
+  min-width: 0;
+}
+
+.stat-value {
+  margin-top: 8px;
+  font-family: var(--font-mono);
+  font-size: clamp(1.15rem, 2.6vw, 1.5rem);
+  font-weight: 300;
+  color: var(--ink);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stat-value-text { font-family: var(--font-body); font-weight: 500; }
+
+.stats-empty { margin-top: 5vh; text-align: center; }
+
+.chart-section { margin-top: 7vh; }
+.chart-title { margin-bottom: 4px; }
+
+.chart-hint {
+  font-size: 12px;
+  color: var(--faint);
+  margin-bottom: 18px;
+}
+
+.chart-box { position: relative; height: 260px; }
+.donut-box { height: 240px; flex: 0 0 240px; }
+.month-box { margin-top: 18px; }
+
+.donut-wrap {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  margin-top: 8px;
+}
+
+.chart-legend {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+  min-width: 0;
+  flex: 1;
+}
+
+.chart-legend li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--dim);
+  cursor: pointer;
+  transition: color 0.2s;
+}
+.chart-legend li:hover { color: var(--ink); }
+.chart-legend li.static { cursor: default; }
+
+.legend-swatch {
+  width: 9px;
+  height: 9px;
+  border-radius: 3px;
+  flex: none;
+}
+
+.legend-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.legend-value {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: var(--faint);
+  margin-left: auto;
+  padding-left: 12px;
+}
+
+.chart-legend-row {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+  margin-top: 16px;
+}
+.chart-legend-row .legend-value { margin-left: 0; padding-left: 6px; }
+
 /* ── load choreography ───────────────────────────────────────────── */
 
 .reveal {
@@ -480,6 +677,9 @@ body {
 .stage > :nth-child(2) { animation-delay: 0.18s; }
 .stage > :nth-child(4) { animation-delay: 0.32s; }
 .stage > :nth-child(5) { animation-delay: 0.46s; }
+#statsCharts > :nth-child(1) { animation-delay: 0.32s; }
+#statsCharts > :nth-child(2) { animation-delay: 0.46s; }
+#statsCharts > :nth-child(3) { animation-delay: 0.6s; }
 @keyframes reveal {
   to { opacity: 1; transform: translateY(0); }
 }
@@ -500,6 +700,10 @@ body {
   .txn-delete { opacity: 1; }
   .filter-grid { grid-template-columns: 1fr 1fr; }
   .filter-grid .btn-ghost { grid-column: 1 / -1; }
+  .stat-tiles { grid-template-columns: 1fr 1fr; }
+  .donut-wrap { flex-direction: column; align-items: stretch; }
+  .donut-box { flex: none; }
+  .chart-box { height: 240px; }
   .history-list li { grid-template-columns: 44px 1fr auto 24px 24px; }
   .history-list li.editing { display: block; }
   .txn-edit { opacity: 1; }

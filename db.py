@@ -10,6 +10,7 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).resolve().parent
 DB_PATH = Path(os.environ.get("BUDGET_DB", BASE_DIR / "data" / "budget.db"))
+BACKUP_DIR = DB_PATH.parent / "backups"
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS settings (
@@ -86,6 +87,30 @@ def list_names(table: str) -> list[str]:
     return [r["name"] for r in rows]
 
 
+def merchant_top_categories() -> dict[str, str]:
+    """Each merchant's most-used category, keyed by merchant name.
+
+    Powers category autofill when an existing merchant is picked. Ties break
+    toward the most recently used category; merchants with no transactions
+    (names linger after their transactions are deleted) are absent.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT m.name AS merchant, c.name AS category, COUNT(*) AS n, "
+            "MAX(t.txn_date) AS last_used "
+            "FROM transactions t "
+            "JOIN merchants m ON m.id = t.merchant_id "
+            "JOIN categories c ON c.id = t.category_id "
+            "GROUP BY t.merchant_id, t.category_id "
+            "ORDER BY t.merchant_id, n DESC, last_used DESC"
+        ).fetchall()
+
+    top: dict[str, str] = {}
+    for r in rows:
+        top.setdefault(r["merchant"], r["category"])  # rows are pre-ranked per merchant
+    return top
+
+
 def add_transaction(
     amount_cents: int, merchant: str, category: str, txn_date: str, created_at: str
 ) -> dict:
@@ -115,15 +140,13 @@ def get_transaction(txn_id: int) -> dict | None:
     return dict(row) if row else None
 
 
-def list_transactions(
-    start: str | None = None,
-    end: str | None = None,
-    merchant: str | None = None,
-    category: str | None = None,
-    limit: int = 50,
-    offset: int = 0,
-) -> tuple[list[dict], int]:
-    """Filtered page of transactions plus the total matching count.
+def _txn_filter(
+    start: str | None,
+    end: str | None,
+    merchant: str | None,
+    category: str | None,
+) -> tuple[str, list]:
+    """Shared FROM/WHERE clause for filtered transaction queries.
 
     start/end are ISO dates forming a half-open window [start, end).
     Merchant/category match exactly, case-insensitively.
@@ -150,6 +173,19 @@ def list_transactions(
     )
     if where:
         base += "WHERE " + " AND ".join(where) + " "
+    return base, params
+
+
+def list_transactions(
+    start: str | None = None,
+    end: str | None = None,
+    merchant: str | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> tuple[list[dict], int]:
+    """Filtered page of transactions plus the total matching count."""
+    base, params = _txn_filter(start, end, merchant, category)
 
     with connect() as conn:
         total = conn.execute(f"SELECT COUNT(*) AS n {base}", params).fetchone()["n"]
@@ -183,6 +219,93 @@ def delete_transaction(txn_id: int) -> bool:
     with connect() as conn:
         cur = conn.execute("DELETE FROM transactions WHERE id = ?", (txn_id,))
     return cur.rowcount > 0
+
+
+def stats_between(
+    start: str | None = None,
+    end: str | None = None,
+    merchant: str | None = None,
+    category: str | None = None,
+) -> dict:
+    """Aggregates for the stats page, all under the same filter semantics
+    as list_transactions. Sums are integer cents.
+    """
+    base, params = _txn_filter(start, end, merchant, category)
+
+    with connect() as conn:
+        totals = conn.execute(
+            f"SELECT COALESCE(SUM(t.amount_cents), 0) AS cents, COUNT(*) AS count {base}",
+            params,
+        ).fetchone()
+        by_category = conn.execute(
+            "SELECT c.name AS name, SUM(t.amount_cents) AS cents, COUNT(*) AS count "
+            f"{base}GROUP BY c.id ORDER BY cents DESC",
+            params,
+        ).fetchall()
+        by_merchant = conn.execute(
+            "SELECT m.name AS name, SUM(t.amount_cents) AS cents, COUNT(*) AS count "
+            f"{base}GROUP BY m.id ORDER BY cents DESC",
+            params,
+        ).fetchall()
+        by_month = conn.execute(
+            "SELECT substr(t.txn_date, 1, 7) AS month, c.name AS category, "
+            "SUM(t.amount_cents) AS cents "
+            f"{base}GROUP BY month, c.id ORDER BY month",
+            params,
+        ).fetchall()
+
+    return {
+        "totals": dict(totals),
+        "by_category": [dict(r) for r in by_category],
+        "by_merchant": [dict(r) for r in by_merchant],
+        "by_month": [dict(r) for r in by_month],
+    }
+
+
+def reset_database(stamp: str) -> str:
+    """Back the database up to a timestamped file, then empty the live one.
+
+    The "soft" in soft delete is the backup: nothing is lost, it just stops
+    counting. Returns the backup's filename.
+
+    Two deliberate mechanics:
+    - The snapshot uses SQLite's online backup API instead of copying the file,
+      so it is consistent even if a write is in flight and leaves no journal.
+    - The live database is emptied in place rather than unlinked and recreated.
+      It's a volume-mounted file under Docker, and replacing the inode would
+      strand any connection still holding the old one.
+
+    The monthly budget is a setting rather than history, so it is carried over.
+    """
+    BACKUP_DIR.mkdir(parents=True, exist_ok=True)
+    # Never overwrite an existing backup — two resets in the same second still
+    # each keep their own copy.
+    backup_path = BACKUP_DIR / f"budget-{stamp}.db"
+    attempt = 1
+    while backup_path.exists():
+        attempt += 1
+        backup_path = BACKUP_DIR / f"budget-{stamp}-{attempt}.db"
+
+    src = connect()
+    try:
+        dst = sqlite3.connect(backup_path)
+        try:
+            src.backup(dst)
+        finally:
+            dst.close()
+    finally:
+        src.close()
+
+    budget_cents = get_monthly_budget_cents()
+    with connect() as conn:
+        # transactions first: they reference merchants/categories.
+        for table in ("transactions", "merchants", "categories", "settings"):
+            conn.execute(f"DELETE FROM {table}")
+    with connect() as conn:
+        conn.execute("VACUUM")  # shrink the file and drop the freed pages
+    set_monthly_budget_cents(budget_cents)
+
+    return backup_path.name
 
 
 def spent_cents_between(start_iso: str, end_iso: str) -> int:
