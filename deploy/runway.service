@@ -1,0 +1,39 @@
+[Unit]
+Description=Runway budget tracker
+Documentation=https://github.com/anthonyfernandes/runway
+# network-online rather than network: uvicorn binds 0.0.0.0 at startup and
+# the Zero 2 W's wifi associates late in boot.
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=exec
+User=pi
+Group=pi
+WorkingDirectory=/home/pi/runway
+
+# No BUDGET_DB and no TZ on purpose. db.py resolves the database relative to
+# its own directory (./data/budget.db), and a native process inherits the
+# system timezone from raspi-config -- which is what the weekly/monthly
+# window math reads.
+ExecStart=/home/pi/runway/.venv/bin/uvicorn main:app --host 0.0.0.0 --port 8100
+
+Restart=on-failure
+RestartSec=5
+
+# 512 MB shared with Pi-hole. Runway idles around 80 MB, so this is roughly
+# 2x headroom -- and it means a runaway Runway gets killed instead of the
+# kernel picking a victim, which could otherwise be pihole-FTL.
+MemoryMax=192M
+
+# Modest hardening. ProtectHome is deliberately absent: WorkingDirectory
+# lives under /home/pi. ProtectSystem=full leaves /home writable, so the
+# SQLite database and data/backups/ still work.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectKernelTunables=true
+ProtectControlGroups=true
+
+[Install]
+WantedBy=multi-user.target
