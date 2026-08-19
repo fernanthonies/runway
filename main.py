@@ -21,6 +21,7 @@ db.init_db()
 
 MAX_AMOUNT = 1_000_000
 MAX_NAME_LEN = 64
+MAX_COMMENT_LEN = 280
 
 
 def cents_to_dollars(cents: int) -> float:
@@ -128,6 +129,7 @@ class TransactionIn(BaseModel):
     merchant: str
     category: str
     date: str | None = None
+    comment: str | None = None
 
 
 class SettingsIn(BaseModel):
@@ -154,14 +156,31 @@ def _parse_date(value: str, label: str = "Date") -> date:
         raise HTTPException(400, f"{label} must be YYYY-MM-DD")
 
 
-def _validate_txn(body: "TransactionIn") -> tuple[int, str, str, str]:
-    """Validate a transaction payload; returns (amount_cents, merchant, category, txn_date_iso)."""
+def _clean_comment(value: str | None) -> str | None:
+    """Optional free text. Blank and absent are the same thing: no comment.
+
+    Unlike merchant/category this is not an identity, so internal whitespace and
+    case are left exactly as typed — only the ends are trimmed.
+    """
+    if value is None:
+        return None
+    comment = value.strip()
+    if not comment:
+        return None
+    if len(comment) > MAX_COMMENT_LEN:
+        raise HTTPException(400, f"Comment must be {MAX_COMMENT_LEN} characters or fewer")
+    return comment
+
+
+def _validate_txn(body: "TransactionIn") -> tuple[int, str, str, str, str | None]:
+    """Validate a transaction payload; returns (amount_cents, merchant, category, txn_date_iso, comment)."""
     if not (0 < body.amount < MAX_AMOUNT):
         raise HTTPException(400, "Amount must be greater than 0")
     merchant = _clean_name(body.merchant, "Merchant")
     category = _clean_name(body.category, "Category")
     txn_date = _parse_date(body.date) if body.date else date.today()
-    return dollars_to_cents(body.amount), merchant, category, txn_date.isoformat()
+    comment = _clean_comment(body.comment)
+    return dollars_to_cents(body.amount), merchant, category, txn_date.isoformat(), comment
 
 
 def txn_to_json(txn: dict) -> dict:
@@ -172,6 +191,7 @@ def txn_to_json(txn: dict) -> dict:
         "category": txn["category"],
         "date": txn["txn_date"],
         "created_at": txn["created_at"],
+        "comment": txn["comment"],
     }
 
 
@@ -187,13 +207,14 @@ def get_widget():
 
 @app.post("/api/transactions", status_code=201)
 def create_transaction(body: TransactionIn):
-    amount_cents, merchant, category, txn_date = _validate_txn(body)
+    amount_cents, merchant, category, txn_date, comment = _validate_txn(body)
     txn = db.add_transaction(
         amount_cents,
         merchant,
         category,
         txn_date,
         datetime.now().isoformat(timespec="seconds"),
+        comment,
     )
     return {"transaction": txn_to_json(txn), "summary": build_summary()}
 
@@ -252,8 +273,8 @@ def get_stats(
 
 @app.put("/api/transactions/{txn_id}")
 def edit_transaction(txn_id: int, body: TransactionIn):
-    amount_cents, merchant, category, txn_date = _validate_txn(body)
-    txn = db.update_transaction(txn_id, amount_cents, merchant, category, txn_date)
+    amount_cents, merchant, category, txn_date, comment = _validate_txn(body)
+    txn = db.update_transaction(txn_id, amount_cents, merchant, category, txn_date, comment)
     if txn is None:
         raise HTTPException(404, "Transaction not found")
     return {"transaction": txn_to_json(txn), "summary": build_summary()}

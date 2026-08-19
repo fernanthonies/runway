@@ -246,7 +246,21 @@ body {
 .money-field:focus-within .prefix {
   border-color: color-mix(in srgb, var(--mint) 65%, transparent);
 }
-.money-field input { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+/* Optional, so it gets its own full-width row under the required three and
+   sits quieter than them until focused. */
+.comment-field {
+  grid-column: 1 / -1;
+  margin-top: 4px;
+}
+.comment-field input {
+  font-size: 14px;
+  color: var(--dim);
+  /* Half the hairline of the required fields: still legibly an input, but
+     visibly the optional one. */
+  border-bottom-color: rgba(233, 243, 237, 0.045);
+}
+.comment-field input:hover { border-bottom-color: var(--hair); }
+.comment-field input:focus { color: var(--ink); }
 
 .entry-actions {
   display: flex;

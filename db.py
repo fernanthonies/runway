@@ -34,7 +34,8 @@ CREATE TABLE IF NOT EXISTS transactions (
     merchant_id  INTEGER NOT NULL REFERENCES merchants(id),
     category_id  INTEGER NOT NULL REFERENCES categories(id),
     txn_date     TEXT NOT NULL,
-    created_at   TEXT NOT NULL
+    created_at   TEXT NOT NULL,
+    comment      TEXT
 );
 
 CREATE INDEX IF NOT EXISTS idx_transactions_date ON transactions(txn_date);
@@ -52,6 +53,21 @@ def connect() -> sqlite3.Connection:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _add_missing_columns(conn)
+
+
+# Columns added after the first release. SCHEMA only runs CREATE TABLE IF NOT
+# EXISTS, so an existing database never picks them up from it — they are added
+# here instead. Each entry is (table, column, definition); adding one is safe to
+# re-run because the column list is checked first.
+LATER_COLUMNS = [("transactions", "comment", "TEXT")]
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, column, definition in LATER_COLUMNS:
+        existing = {r["name"] for r in conn.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
 
 def get_monthly_budget_cents() -> int:
@@ -112,15 +128,21 @@ def merchant_top_categories() -> dict[str, str]:
 
 
 def add_transaction(
-    amount_cents: int, merchant: str, category: str, txn_date: str, created_at: str
+    amount_cents: int,
+    merchant: str,
+    category: str,
+    txn_date: str,
+    created_at: str,
+    comment: str | None = None,
 ) -> dict:
     with connect() as conn:
         merchant_id = _upsert_name(conn, "merchants", merchant)
         category_id = _upsert_name(conn, "categories", category)
         cur = conn.execute(
-            "INSERT INTO transactions (amount_cents, merchant_id, category_id, txn_date, created_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (amount_cents, merchant_id, category_id, txn_date, created_at),
+            "INSERT INTO transactions "
+            "(amount_cents, merchant_id, category_id, txn_date, created_at, comment) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (amount_cents, merchant_id, category_id, txn_date, created_at, comment),
         )
         txn_id = cur.lastrowid
     return get_transaction(txn_id)
@@ -129,7 +151,7 @@ def add_transaction(
 def get_transaction(txn_id: int) -> dict | None:
     with connect() as conn:
         row = conn.execute(
-            "SELECT t.id, t.amount_cents, t.txn_date, t.created_at, "
+            "SELECT t.id, t.amount_cents, t.txn_date, t.created_at, t.comment, "
             "m.name AS merchant, c.name AS category "
             "FROM transactions t "
             "JOIN merchants m ON m.id = t.merchant_id "
@@ -190,7 +212,7 @@ def list_transactions(
     with connect() as conn:
         total = conn.execute(f"SELECT COUNT(*) AS n {base}", params).fetchone()["n"]
         rows = conn.execute(
-            "SELECT t.id, t.amount_cents, t.txn_date, t.created_at, "
+            "SELECT t.id, t.amount_cents, t.txn_date, t.created_at, t.comment, "
             "m.name AS merchant, c.name AS category "
             f"{base}ORDER BY t.txn_date DESC, t.id DESC LIMIT ? OFFSET ?",
             (*params, limit, offset),
@@ -199,7 +221,12 @@ def list_transactions(
 
 
 def update_transaction(
-    txn_id: int, amount_cents: int, merchant: str, category: str, txn_date: str
+    txn_id: int,
+    amount_cents: int,
+    merchant: str,
+    category: str,
+    txn_date: str,
+    comment: str | None = None,
 ) -> dict | None:
     with connect() as conn:
         # Check existence first so a 404 doesn't leave upserted names behind.
@@ -209,8 +236,8 @@ def update_transaction(
         category_id = _upsert_name(conn, "categories", category)
         conn.execute(
             "UPDATE transactions SET amount_cents = ?, merchant_id = ?, "
-            "category_id = ?, txn_date = ? WHERE id = ?",
-            (amount_cents, merchant_id, category_id, txn_date, txn_id),
+            "category_id = ?, txn_date = ?, comment = ? WHERE id = ?",
+            (amount_cents, merchant_id, category_id, txn_date, comment, txn_id),
         )
     return get_transaction(txn_id)
 

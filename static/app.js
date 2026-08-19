@@ -14,6 +14,7 @@ const els = {
   amount: $("#amountInput"),
   merchant: $("#merchantInput"),
   category: $("#categoryInput"),
+  comment: $("#commentInput"),
   date: $("#dateInput"),
   formError: $("#formError"),
   recentList: $("#recentList"),
@@ -258,6 +259,7 @@ async function submitTransaction(e) {
         merchant: els.merchant.value,
         category: els.category.value,
         date: els.date.value || null,
+        comment: els.comment.value || null,
       }),
     });
   } catch (err) {
@@ -481,13 +483,19 @@ function editRow(li, t) {
   categoryInput.setAttribute("aria-label", "Category");
   const categoryField = makeField("ac-field", categoryInput);
 
+  const commentInput = Object.assign(document.createElement("input"), {
+    type: "text", value: t.comment ?? "", placeholder: "Comment (optional)", maxLength: 280,
+  });
+  commentInput.setAttribute("aria-label", "Comment");
+  const commentField = makeField("comment-field", commentInput);
+
   const dateInput = Object.assign(document.createElement("input"), { type: "date", value: t.date });
   dateInput.setAttribute("aria-label", "Date");
   const dateField = makeField("date-field", dateInput);
 
   const grid = document.createElement("div");
   grid.className = "edit-grid";
-  grid.append(amountField, merchantField, categoryField);
+  grid.append(amountField, merchantField, categoryField, commentField);
 
   const save = Object.assign(document.createElement("button"), {
     type: "button", className: "btn btn-small", textContent: "Save",
@@ -540,6 +548,7 @@ function editRow(li, t) {
           merchant: merchantInput.value,
           category: categoryInput.value,
           date: dateInput.value || null,
+          comment: commentInput.value || null,
         }),
       });
     } catch (err) {
