@@ -42,27 +42,84 @@ def month_bounds(today: date) -> tuple[date, date]:
     return first, next_first
 
 
-def build_summary() -> dict:
+def _summary_cents() -> dict:
+    """The window math, in cents. Sole source for /api/summary and /api/widget."""
     today = date.today()
     ws = week_start(today)
     we = ws + timedelta(days=7)
     ms, me = month_bounds(today)
 
     budget_c = db.get_monthly_budget_cents()
+    weekly_allowance_c = round(budget_c / 4)
     monthly_spent_c = db.spent_cents_between(ms.isoformat(), me.isoformat())
     weekly_spent_c = db.spent_cents_between(ws.isoformat(), we.isoformat())
-    weekly_allowance_c = round(budget_c / 4)
 
     return {
-        "today": today.isoformat(),
-        "month_start": ms.isoformat(),
-        "week_start": ws.isoformat(),
-        "monthly_budget": cents_to_dollars(budget_c),
-        "monthly_spent": cents_to_dollars(monthly_spent_c),
-        "monthly_remaining": cents_to_dollars(budget_c - monthly_spent_c),
-        "weekly_allowance": cents_to_dollars(weekly_allowance_c),
-        "weekly_spent": cents_to_dollars(weekly_spent_c),
-        "weekly_remaining": cents_to_dollars(weekly_allowance_c - weekly_spent_c),
+        "today": today,
+        "month_start": ms,
+        "week_start": ws,
+        "monthly_budget_c": budget_c,
+        "monthly_spent_c": monthly_spent_c,
+        "monthly_remaining_c": budget_c - monthly_spent_c,
+        "weekly_allowance_c": weekly_allowance_c,
+        "weekly_spent_c": weekly_spent_c,
+        "weekly_remaining_c": weekly_allowance_c - weekly_spent_c,
+    }
+
+
+def build_summary() -> dict:
+    s = _summary_cents()
+    return {
+        "today": s["today"].isoformat(),
+        "month_start": s["month_start"].isoformat(),
+        "week_start": s["week_start"].isoformat(),
+        "monthly_budget": cents_to_dollars(s["monthly_budget_c"]),
+        "monthly_spent": cents_to_dollars(s["monthly_spent_c"]),
+        "monthly_remaining": cents_to_dollars(s["monthly_remaining_c"]),
+        "weekly_allowance": cents_to_dollars(s["weekly_allowance_c"]),
+        "weekly_spent": cents_to_dollars(s["weekly_spent_c"]),
+        "weekly_remaining": cents_to_dollars(s["weekly_remaining_c"]),
+    }
+
+
+def state_for(remaining_c: int, allowance_c: int) -> str:
+    """Server-side twin of `stateClass()` in app.js — keep the two in step.
+
+    The widget can't see the stylesheet, so the colour decision ships with the
+    numbers rather than being reimplemented on the phone.
+    """
+    if allowance_c <= 0:
+        return "unset"
+    if remaining_c < 0:
+        return "neg"
+    if remaining_c <= allowance_c * 0.2:
+        return "low"
+    return "ok"
+
+
+def _window(remaining_c: int, allowance_c: int, spent_c: int) -> dict:
+    frac = max(0.0, min(1.0, remaining_c / allowance_c)) if allowance_c > 0 else 0.0
+    return {
+        "remaining": cents_to_dollars(remaining_c),
+        "allowance": cents_to_dollars(allowance_c),
+        "spent": cents_to_dollars(spent_c),
+        "fraction": round(frac, 4),
+        "state": state_for(remaining_c, allowance_c),
+    }
+
+
+def build_widget() -> dict:
+    """Minimal payload for the iOS widget: two numbers, each with its state.
+
+    Deliberately a separate shape from /api/summary so the widget's contract
+    doesn't move whenever the web UI needs another field.
+    """
+    s = _summary_cents()
+    return {
+        "as_of": datetime.now().isoformat(timespec="seconds"),
+        "today": s["today"].isoformat(),
+        "week": _window(s["weekly_remaining_c"], s["weekly_allowance_c"], s["weekly_spent_c"]),
+        "month": _window(s["monthly_remaining_c"], s["monthly_budget_c"], s["monthly_spent_c"]),
     }
 
 
@@ -121,6 +178,11 @@ def txn_to_json(txn: dict) -> dict:
 @app.get("/api/summary")
 def get_summary():
     return build_summary()
+
+
+@app.get("/api/widget")
+def get_widget():
+    return build_widget()
 
 
 @app.post("/api/transactions", status_code=201)
