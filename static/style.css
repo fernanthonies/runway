@@ -724,3 +724,31 @@ body {
   .edit-grid { grid-template-columns: 1fr 1fr; }
   .edit-grid .money-field { grid-column: 1 / -1; }
 }
+
+/* ── surplus / deficit chart ─────────────────────────────────────── */
+
+/* Taller than the other boxes: bars run both ways off a centred zero line,
+   so half the height is spent before the first surplus is drawn. */
+.net-box { height: 300px; }
+
+.net-legend { margin-top: 10px; }
+
+/* The weekly series is two-toned by sign, so its swatch is too. */
+.swatch-split {
+  background: linear-gradient(90deg, var(--mint) 0 50%, var(--red) 50% 100%);
+}
+
+/* The monthly series is a line, not a fill — a bar-shaped swatch would read
+   as a third bar series. */
+.swatch-line {
+  background: none;
+  border-radius: 0;
+  width: 14px;
+  height: 2px;
+  align-self: center;
+  background-color: var(--ink);
+}
+
+@media (max-width: 640px) {
+  .net-box { height: 260px; }
+}

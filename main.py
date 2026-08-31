@@ -124,6 +124,99 @@ def build_widget() -> dict:
     }
 
 
+# A guard on the period walk, not a real limit: ~7 years of weeks.
+MAX_PERIODS = 400
+
+
+def _month_start(d: date) -> date:
+    return d.replace(day=1)
+
+
+def _next_month(d: date) -> date:
+    return (d.replace(day=1) + timedelta(days=32)).replace(day=1)
+
+
+def _periods(kind: str, range_start: date, range_end: date, today: date):
+    """Walk complete periods of `kind` that overlap [range_start, range_end].
+
+    Yields (start, end_exclusive). A period is emitted only once it has fully
+    elapsed, so the in-progress week and month are skipped — a month that is
+    three days old would otherwise post a near-total surplus and read as the
+    best month on record.
+    """
+    if kind == "week":
+        start, step = week_start(range_start), lambda d: d + timedelta(days=7)
+    else:
+        start, step = _month_start(range_start), _next_month
+
+    for _ in range(MAX_PERIODS):
+        if start > range_end:
+            return
+        end = step(start)
+        if end <= today:
+            yield start, end
+        start = end
+
+
+def build_budget_history(start: date | None, end: date | None) -> dict:
+    """Per-period surplus/deficit for the stats view's runway chart.
+
+    Every period is scored on its own full spend against its own allowance, so
+    a period's number never depends on the window you view it through — the
+    range only chooses which periods are shown. For the same reason merchant
+    and category filters are deliberately absent: a period's result is measured
+    against the whole budget, and narrowing to one category would make every
+    period look like a surplus.
+
+    Both windows are scored against the *current* monthly budget. It is a
+    single setting with no history, so there is no record of what it was in
+    March; changing it rescales the whole chart, which is why the UI says so.
+    """
+    today = date.today()
+    budget_c = db.get_monthly_budget_cents()
+    weekly_allowance_c = round(budget_c / 4)
+    result = {
+        "monthly_budget": cents_to_dollars(budget_c),
+        "weekly_allowance": cents_to_dollars(weekly_allowance_c),
+        "weeks": [],
+        "months": [],
+    }
+
+    first = db.first_txn_date()
+    if first is None:
+        return result
+    # Clamp to the first transaction: periods before tracking began had no
+    # budget to under-spend, and would otherwise post a phantom full surplus
+    # whenever a preset range reaches back further than the log does.
+    first_date = date.fromisoformat(first)
+    range_start = max(start, first_date) if start else first_date
+    range_end = end or today
+    if range_end < range_start:
+        return result
+
+    def row(p_start: date, p_end: date, spent_c: int, allowance_c: int) -> dict:
+        return {
+            "start": p_start.isoformat(),
+            # inclusive end, so the client can label a week "AUG 2 – AUG 8"
+            "end": (p_end - timedelta(days=1)).isoformat(),
+            "allowance": cents_to_dollars(allowance_c),
+            "spent": cents_to_dollars(spent_c),
+            "net": cents_to_dollars(allowance_c - spent_c),
+        }
+
+    by_week = db.spent_cents_by_period("week")
+    by_month = db.spent_cents_by_period("month")
+    result["weeks"] = [
+        row(s, e, by_week.get(s.isoformat(), 0), weekly_allowance_c)
+        for s, e in _periods("week", range_start, range_end, today)
+    ]
+    result["months"] = [
+        row(s, e, by_month.get(s.isoformat()[:7], 0), budget_c)
+        for s, e in _periods("month", range_start, range_end, today)
+    ]
+    return result
+
+
 class TransactionIn(BaseModel):
     amount: float
     merchant: str
@@ -269,6 +362,20 @@ def get_stats(
             for r in stats["by_month"]
         ],
     }
+
+
+@app.get("/api/budget-history")
+def get_budget_history(start: str | None = None, end: str | None = None):
+    """Surplus/deficit per completed week and month.
+
+    Unlike /api/transactions and /api/stats, `end` stays an inclusive calendar
+    bound rather than becoming a half-open transaction window: it selects which
+    periods to show, not which transactions to count.
+    """
+    return build_budget_history(
+        _parse_date(start, "Start date") if start else None,
+        _parse_date(end, "End date") if end else None,
+    )
 
 
 @app.put("/api/transactions/{txn_id}")

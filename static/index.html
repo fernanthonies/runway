@@ -10,7 +10,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Azeret+Mono:wght@200;300;400;500&family=Spline+Sans:wght@400;500;600&display=swap" rel="stylesheet">
   <!-- ?v= busts copies cached before the no-cache headers existed; bump if a
        stale asset ever survives a rebuild again. -->
-  <link rel="stylesheet" href="/static/style.css?v=3">
+  <link rel="stylesheet" href="/static/style.css?v=4">
 </head>
 <body>
   <div class="grain" aria-hidden="true"></div>
@@ -190,6 +190,20 @@
       </div>
     </section>
 
+    <!-- Outside #statsCharts on purpose: this one ignores the merchant and
+         category filters, so it must not hide when a drill-down comes back
+         empty. -->
+    <section class="chart-section reveal" id="netSection" hidden>
+      <div class="label chart-title">SURPLUS / DEFICIT BY PERIOD</div>
+      <p class="chart-hint" id="netHint"></p>
+      <div class="chart-box net-box"><canvas id="netChart"></canvas></div>
+      <ul class="chart-legend chart-legend-row net-legend">
+        <li class="static"><span class="legend-swatch swatch-split"></span><span class="legend-name">WEEK</span></li>
+        <li class="static"><span class="legend-swatch swatch-line"></span><span class="legend-name">MONTH</span></li>
+      </ul>
+    </section>
+    <p class="empty stats-empty" id="netEmpty" hidden>No completed week or month in this period yet.</p>
+
     <p class="empty stats-empty" id="statsEmpty" hidden>No transactions in this period.</p>
     <p class="form-error" id="statsError" hidden></p>
 
@@ -218,6 +232,6 @@
   </main>
 
   <script src="/static/chart.umd.min.js"></script>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

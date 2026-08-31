@@ -344,3 +344,37 @@ def spent_cents_between(start_iso: str, end_iso: str) -> int:
             (start_iso, end_iso),
         ).fetchone()
     return row["total"]
+
+
+# Most recent Sunday on or before txn_date — the SQL twin of `week_start()` in
+# main.py. `weekday 0` snaps forward to the next Sunday, so backing up six days
+# first lands on the Sunday that started the week.
+_PERIOD_KEY = {
+    "week": "date(txn_date, '-6 days', 'weekday 0')",
+    "month": "substr(txn_date, 1, 7)",
+}
+
+
+def spent_cents_by_period(period: str) -> dict[str, int]:
+    """Total spend per calendar period, keyed by period start.
+
+    Weeks key on an ISO date (their Sunday), months on `YYYY-MM`. Every
+    transaction is counted, unfiltered by merchant or category: a period's
+    result is measured against the whole budget, so narrowing to one category
+    would make every period look like a surplus. Periods with no transactions
+    are simply absent — the caller enumerates the calendar and fills the gaps.
+    """
+    key = _PERIOD_KEY[period]
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT {key} AS period, SUM(amount_cents) AS cents "
+            "FROM transactions GROUP BY period"
+        ).fetchall()
+    return {r["period"]: r["cents"] for r in rows}
+
+
+def first_txn_date() -> str | None:
+    """Earliest txn_date in the log, or None when there are no transactions."""
+    with connect() as conn:
+        row = conn.execute("SELECT MIN(txn_date) AS d FROM transactions").fetchone()
+    return row["d"]

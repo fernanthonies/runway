@@ -60,6 +60,9 @@ const els = {
   statsCharts: $("#statsCharts"),
   categoryLegend: $("#categoryLegend"),
   monthLegend: $("#monthLegend"),
+  netSection: $("#netSection"),
+  netHint: $("#netHint"),
+  netEmpty: $("#netEmpty"),
 };
 
 const state = {
@@ -613,10 +616,12 @@ els.loadMore.addEventListener("click", () => loadHistory());
 const PALETTE = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#008300", "#9085e9", "#e66767"];
 const OTHER_COLOR = "#55695f";
 const ACCENT = "#63f2ac"; // single-series marks (matches --mint)
+const NEG = "#ff6a5a"; // over-budget marks (matches --red)
+const INK = "#e9f3ed";
 const SURFACE = "#0a130e"; // gap color between touching marks
 const OTHER_LABEL = "Other";
 
-const charts = { category: null, merchant: null, month: null };
+const charts = { category: null, merchant: null, month: null, net: null };
 
 if (window.Chart) {
   Chart.defaults.font.family = "'Azeret Mono', ui-monospace, monospace";
@@ -711,9 +716,18 @@ async function loadStats() {
   try {
     await ensureColorMap();
     const q = statsQuery();
-    const data = await api(`/stats${q ? `?${q}` : ""}`);
+    // The two calls take different filters on purpose: budget history is
+    // whole-budget maths, so it gets the date range and nothing else.
+    const range = new URLSearchParams();
+    if (els.statsStart.value) range.set("start", els.statsStart.value);
+    if (els.statsEnd.value) range.set("end", els.statsEnd.value);
+    const [data, history] = await Promise.all([
+      api(`/stats${q ? `?${q}` : ""}`),
+      api(`/budget-history${range.toString() ? `?${range}` : ""}`),
+    ]);
     state.stats.loaded = true;
     renderStats(data);
+    renderNetChart(history);
   } catch (err) {
     showStatsError(err.message);
   }
@@ -757,8 +771,14 @@ function foldByColor(rows) {
 }
 
 function replaceChart(key, canvasId, config) {
-  charts[key]?.destroy();
-  charts[key] = new Chart($(`#${canvasId}`), config);
+  const canvas = $(`#${canvasId}`);
+  // Chart.getChart() is the fallback: if a previous `new Chart` threw during
+  // its first render it still registered itself against the canvas, but never
+  // reached the assignment below. Without this, one bad render bricks the
+  // canvas for the rest of the session with "Canvas is already in use".
+  (charts[key] ?? Chart.getChart(canvas))?.destroy();
+  charts[key] = null;
+  charts[key] = new Chart(canvas, config);
 }
 
 function drillCategory(name) {
@@ -1092,6 +1112,169 @@ function renderMonthChart(byMonth) {
     },
   });
 }
+
+/* ── surplus / deficit by period ─────────────────────────────────── */
+
+// A week is drawn under the month holding its midpoint. The two windows are
+// genuinely independent — a week straddling the 1st draws on both months — so
+// this only decides where the step lands, not the maths.
+function weekMonth(startISO) {
+  const d = new Date(`${startISO}T00:00:00`);
+  d.setDate(d.getDate() + 3);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
+// The year is only worth its width where it changes: on January, and on the
+// first tick so the reader knows where they started.
+function monthTick(ym, withYear) {
+  const name = MONTH_NAMES[Number(ym.slice(5, 7)) - 1];
+  return withYear ? `${name} '${ym.slice(2, 4)}` : name;
+}
+
+function weekRangeLabel(w) {
+  const fmt = (iso) =>
+    new Date(`${iso}T00:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(w.start)} – ${fmt(w.end)}`;
+}
+
+const signed = (n) => `${n > 0 ? "+" : ""}${formatMoney(n)}`;
+const ZERO_LINE = "rgba(233, 243, 237, 0.28)";
+const MONTH_TICK_PX = 44; // width a month tick needs before ticks get thinned
+
+function renderNetChart(history) {
+  const { weeks, months, monthly_budget: budget, weekly_allowance: weekly } = history;
+
+  // No complete week means nothing to plot: the month line rides the weekly
+  // axis, so months on their own have nowhere to sit.
+  const nothing = weeks.length === 0;
+  els.netSection.hidden = nothing;
+  els.netEmpty.hidden = !nothing;
+  if (nothing) {
+    charts.net?.destroy();
+    charts.net = null;
+    return;
+  }
+
+  els.netHint.textContent =
+    budget > 0
+      ? `Completed periods only. Scored against the current budget (${formatMoney(budget)}/mo · ${formatMoney(weekly)}/wk) — changing it rescales the whole history. Merchant and category filters don't apply here.`
+      : "Set a monthly budget to see this — with no allowance every period is a pure deficit.";
+
+  const monthNet = new Map(months.map((m) => [m.start.slice(0, 7), m.net]));
+  const weekMonths = weeks.map((w) => weekMonth(w.start));
+
+  // One tick per month, printed on that month's first week, so the weekly axis
+  // reads as months without needing a second scale. `tickMonth` marks which
+  // weeks carry a tick; `monthOrdinal` counts months so narrow charts can thin
+  // them to every 2nd or 3rd.
+  const tickMonth = [];
+  const monthOrdinal = [];
+  let prev = null;
+  let ord = -1;
+  for (const ym of weekMonths) {
+    if (ym === prev) {
+      tickMonth.push(null);
+    } else {
+      tickMonth.push(ym);
+      prev = ym;
+      ord += 1;
+    }
+    monthOrdinal.push(ord);
+  }
+  const monthCount = ord + 1;
+
+  const weekNet = weeks.map((w) => w.net);
+  // Flat across the weeks of a month, and null for a month still running —
+  // spanGaps:false then breaks the line rather than guessing across the gap.
+  const monthLine = weekMonths.map((ym) => monthNet.get(ym) ?? null);
+
+  replaceChart("net", "netChart", {
+    type: "bar",
+    data: {
+      // Blank strings, not nulls — the category scale wants real labels; the
+      // visible text is resolved in the x tick callback below.
+      labels: tickMonth.map((ym) => ym || ""),
+      datasets: [
+        {
+          type: "line",
+          label: "Month",
+          data: monthLine,
+          borderColor: INK,
+          borderWidth: 2,
+          stepped: "middle", // the step lands on the boundary, between two weeks
+          spanGaps: false,
+          pointRadius: 0,
+          pointHoverRadius: 0,
+          order: 0, // drawn over the bars
+        },
+        {
+          label: "Week",
+          data: weekNet,
+          backgroundColor: weekNet.map((v) => (v < 0 ? NEG : ACCENT)),
+          // Only bites while the history is short: past ~20 weeks the natural
+          // bar width is well under this, so the cap stops mattering.
+          maxBarThickness: 32,
+          borderRadius: 3,
+          borderSkipped: "start", // square on the zero line, rounded at the data end
+          order: 1,
+        },
+      ],
+    },
+    options: {
+      maintainAspectRatio: false,
+      // hovering a week reads out that week and the month it sits in
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: {
+          grid: { display: false },
+          border: { display: false },
+          ticks: {
+            // autoSkip can't help here — it thins by index, and most indices
+            // are blank weeks, so it would drop month ticks and keep gaps.
+            autoSkip: false,
+            maxRotation: 0,
+            callback(_value, i) {
+              const ym = tickMonth[i];
+              if (!ym) return "";
+              // chartArea is undefined on the first tick pass — ticks are
+              // generated before layout runs. Fall back to the canvas width;
+              // the pass after layout comes back with the real number.
+              const width = this.chart.chartArea?.width ?? this.chart.width;
+              const perMonth = width / monthCount;
+              const stride = Math.max(1, Math.ceil(MONTH_TICK_PX / perMonth));
+              if (monthOrdinal[i] % stride) return "";
+              // The year costs more width than it is worth once ticks are
+              // thinned; the range controls and tooltips still carry it.
+              return monthTick(ym, stride === 1 && (i === 0 || ym.endsWith("-01")));
+            },
+          },
+        },
+        y: {
+          // zero is the whole point of this chart, so it gets a real line
+          grid: {
+            color: (ctx) => (ctx.tick.value === 0 ? ZERO_LINE : HAIR_GRID),
+            drawTicks: false,
+          },
+          border: { display: false },
+          ticks: { callback: (v) => usdCompact.format(v), maxTicksLimit: 7 },
+        },
+      },
+      plugins: {
+        tooltip: {
+          filter: (item) => item.parsed.y != null, // skip a month still in progress
+          callbacks: {
+            title: (items) => weekRangeLabel(weeks[items[0].dataIndex]),
+            label: (ctx) =>
+              ctx.dataset.label === "Month"
+                ? ` ${monthTick(weekMonths[ctx.dataIndex], true)}  ${signed(ctx.parsed.y)}`
+                : ` Week  ${signed(ctx.parsed.y)}`,
+          },
+        },
+      },
+    },
+  });
+}
+
 
 for (const btn of els.presetRow.querySelectorAll(".preset")) {
   btn.addEventListener("click", () => applyPreset(btn.dataset.preset));
