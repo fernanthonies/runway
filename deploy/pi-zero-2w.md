@@ -36,8 +36,8 @@ request time. Wrong timezone means the resets happen at the wrong midnight.
 sudo apt update
 sudo apt install -y git python3-venv
 
-git clone <your-remote> /home/pi/runway
-cd /home/pi/runway
+git clone https://github.com/fernanthonies/runway.git ~/runway
+cd ~/runway
 
 python3 -m venv .venv
 .venv/bin/pip install --upgrade pip
@@ -52,14 +52,24 @@ venv is mandatory rather than optional — don't `pip install` globally.
 
 ## 2. Install the service
 
+The unit ships with `pi` hardcoded in four places, which is almost certainly
+wrong for you: Pi OS Bookworm and later dropped the default `pi` account in
+favour of a user you name at imaging time. Patch it after copying rather than
+editing by hand:
+
 ```bash
-sudo cp deploy/runway.service /etc/systemd/system/runway.service
+sudo cp ~/runway/deploy/runway.service /etc/systemd/system/runway.service
+sudo sed -i "s|^User=pi$|User=$USER|; s|^Group=pi$|Group=$(id -gn)|; s|/home/pi/runway|$HOME/runway|g" /etc/systemd/system/runway.service
+
+# confirm before enabling
+grep -E '^(User|Group|WorkingDirectory|ExecStart)=' /etc/systemd/system/runway.service
+
 sudo systemctl daemon-reload
 sudo systemctl enable --now runway
 ```
 
-If your user isn't `pi`, edit `User=`, `Group=`, `WorkingDirectory=`, and the
-venv path in `ExecStart=` to match before copying.
+The shell expands `$USER`, `$HOME`, and `id -gn` before `sudo` runs, so they
+resolve to your account rather than root's.
 
 ## 3. Verify
 
@@ -81,7 +91,7 @@ so you can use `http://runway.lan:8100`.
 ## 4. Updating
 
 ```bash
-cd /home/pi/runway
+cd ~/runway
 git pull
 .venv/bin/pip install -r requirements.txt   # only if requirements changed
 sudo systemctl restart runway
@@ -104,10 +114,10 @@ lands mid-copy:
 
 ```bash
 # On the Pi, into a staging file:
-sqlite3 /home/pi/runway/data/budget.db ".backup /tmp/budget-backup.db"
+sqlite3 ~/runway/data/budget.db ".backup /tmp/budget-backup.db"
 
-# Then pull it to another machine:
-rsync pi@<pi-ip>:/tmp/budget-backup.db ~/backups/runway/budget-$(date +%F).db
+# Then pull it to another machine (substitute your Pi username):
+rsync <user>@<pi-ip>:/tmp/budget-backup.db ~/backups/runway/budget-$(date +%F).db
 ```
 
 Requires `sudo apt install sqlite3` (the CLI is separate from Python's
